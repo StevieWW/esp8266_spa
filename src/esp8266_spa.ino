@@ -32,11 +32,12 @@
 
 #define VERSION "0.37.4"
 String NEXTVERSION = "http://github.com/EmmanuelLM/esp8266_spa/blob/master/firmware.0.37.5.bin";
-String WIFI_SSID = "Talstation";
-String WIFI_PASSWORD = "werDASliestISTdoof!";
+String WIFI_SSID = "YOURSSID";
+String WIFI_PASSWORD = "YOURSTRONGPASSWORD";
 String BROKER = "192.168.3.1";
 String BROKER_LOGIN = "spa";
 String BROKER_PASS = "spa";
+// see line 858 to check the Port of your MQTT Broker!
 #define AUTO_TX true //if your chip needs to pull D1 high/low set this to false
 #define SAVE_CONN true //save the ip details above to local filesystem
 
@@ -854,7 +855,7 @@ void setup() {
   httpUpdater.setup(&httpServer, "admin", "");
   httpServer.begin();
 
-  mqtt.setServer(BROKER.c_str(), 1980);
+  mqtt.setServer(BROKER.c_str(), 1883);
   mqtt.setCallback(callback);
   mqtt.setKeepAlive(10);
   mqtt.setSocketTimeout(20);
