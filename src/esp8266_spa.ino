@@ -20,7 +20,7 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <ESP8266WiFi.h>
-#include <CircularBuffer.h>
+#include <CircularBuffer.hpp>
 #include <ESP8266WebServer.h>   // Local WebServer used to serve the configuration portal
 #include <ESP8266mDNS.h>
 #include <ESP8266HTTPUpdateServer.h>
@@ -32,11 +32,11 @@
 
 #define VERSION "0.37.4"
 String NEXTVERSION = "http://github.com/EmmanuelLM/esp8266_spa/blob/master/firmware.0.37.5.bin";
-String WIFI_SSID = "beanwifi";
-String WIFI_PASSWORD = "RosieAndElisaBean1";
-String BROKER = "192.168.8.126";
-String BROKER_LOGIN = "mqtt";
-String BROKER_PASS = "13Cambridge!";
+String WIFI_SSID = "Talstation";
+String WIFI_PASSWORD = "werDASliestISTdoof!";
+String BROKER = "192.168.3.1";
+String BROKER_LOGIN = "spa";
+String BROKER_PASS = "spa";
 #define AUTO_TX true //if your chip needs to pull D1 high/low set this to false
 #define SAVE_CONN true //save the ip details above to local filesystem
 
@@ -44,7 +44,7 @@ String BROKER_PASS = "13Cambridge!";
 #define STROFF String("OFF").c_str()
 
 //HomeAssistant autodiscover
-#define HASSIO true
+#define HASSIO false
 #define PRODUCTION true
 
 #define TX485 D1  //find a way to skip this
@@ -69,6 +69,18 @@ uint8_t last_state_crc = 0x00;
 uint8_t send = 0x00;
 uint8_t settemp = 0x00;
 uint8_t id = 0x00;
+uint8_t sethour = 0x00;
+uint8_t setmin = 0x00;
+bool timeset = false;
+uint8_t setf1starthour = 0x00;
+uint8_t setf1startmin = 0x00;
+uint8_t setf1durhour = 0x00;
+uint8_t setf1durmin = 0x00;
+uint8_t setf2starthour = 0x00;
+uint8_t setf2startmin = 0x00;
+uint8_t setf2durhour = 0x00;
+uint8_t setf2durmin = 0x00;
+bool setfilter = false;
 unsigned long lastrx = 0;
 char have_config = 0; //stages: 0-> want it; 1-> requested it; 2-> got it; 3-> further processed it
 char have_faultlog = 0; //stages: 0-> want it; 1-> requested it; 2-> got it; 3-> further processed it
@@ -369,7 +381,7 @@ void decodeState() {
   SpaState.minutes = Q_in[9];
   mqtt.publish("Spa/time/state", s.c_str());
 
-  // 10:Flag Byte 5 - Heating Mode
+  // 10:Flag Byte 5 - Heating Mode :: 0 = Ready, 1 = Rest, 3 = Ready in rest
   switch (Q_in[10]) {
     case 0:mqtt.publish("Spa/heatingmode/state", STRON); //Ready
       mqtt.publish("Spa/heat_mode/state", "heat"); //Ready
@@ -387,7 +399,8 @@ void decodeState() {
   // 15:Flags Byte 10 / Heat status, Temp Range
   d = bitRead(Q_in[15], 4);
   if (d == 0) mqtt.publish("Spa/heatstate/state", STROFF);
-  else if (d == 1 || d == 2) mqtt.publish("Spa/heatstate/state", STRON);
+  else if (d == 1) mqtt.publish("Spa/heatstate/state", STRON);
+  else if (d == 2) mqtt.publish("Spa/heatstate/state", "wait");
 
   d = bitRead(Q_in[15], 2);
   if (d == 0) {
@@ -441,11 +454,11 @@ void decodeState() {
 
   // Publish own relay states
   s = "OFF";
-  if (digitalRead(RLY1) == LOW) s = "ON";
+  if (digitalRead(RLY1) == HIGH) s = "ON";
   mqtt.publish("Spa/relay_1/state", s.c_str());
 
   s = "OFF";
-  if (digitalRead(RLY2) == LOW) s = "ON";
+  if (digitalRead(RLY2) == HIGH) s = "ON";
   mqtt.publish("Spa/relay_2/state", s.c_str());
 }
 
@@ -527,10 +540,22 @@ void mqttpubsub() {
   // ... and resubscribe
   mqtt.subscribe("Spa/command");
   mqtt.subscribe("Spa/target_temp/set");
+  mqtt.subscribe("Spa/time/sethour");
+  mqtt.subscribe("Spa/time/setmin");
+  mqtt.subscribe("Spa/time/timeset");
   mqtt.subscribe("Spa/heatingmode/set");
   mqtt.subscribe("Spa/heat_mode/set");
   mqtt.subscribe("Spa/highrange/set");
-
+  mqtt.subscribe("Spa/filterset/setf1starthour");
+  mqtt.subscribe("Spa/filterset/setf1startmin");
+  mqtt.subscribe("Spa/filterset/setf1durhour");
+  mqtt.subscribe("Spa/filterset/setf1durmin");
+  mqtt.subscribe("Spa/filterset/setf2starthour");
+  mqtt.subscribe("Spa/filterset/setf2startmin");
+  mqtt.subscribe("Spa/filterset/setf2durhour");
+  mqtt.subscribe("Spa/filterset/setf2durmin");
+  mqtt.subscribe("Spa/filterset/setfilter");
+  
   //OPTIONAL ELEMENTS
   if (SpaConfig.pump1 != 0) {
     mqtt.subscribe("Spa/jet_1/set");
@@ -598,8 +623,8 @@ void callback(char* p_topic, byte * p_payload, unsigned int p_length) {
   if (topic.startsWith("Spa/relay_")) {
     bool newstate = 0;
 
-    if (payload.equals("ON")) newstate = LOW;
-    else if (payload.equals("OFF")) newstate = HIGH;
+    if (payload.equals("ON")) newstate = HIGH;
+    else if (payload.equals("OFF")) newstate = LOW;
 
     if (topic.charAt(10) == '1') {
       pinMode(RLY1, INPUT);
@@ -642,6 +667,49 @@ void callback(char* p_topic, byte * p_payload, unsigned int p_length) {
     if (d > 0) d *= 2; // Convert to internal representation
     settemp = d;
     send = 0xff;
+  } else if (topic.equals("Spa/time/setmin")) {
+    // Get new Time (Minute)
+    setmin = payload.toInt();
+    send = 0xff;
+  } else if (topic.equals("Spa/time/sethour")) {
+    // Get new Time (Hour)
+    sethour = payload.toInt();
+    send = 0xff;
+  } else if (topic.equals("Spa/time/timeset")) {
+    // Set new Time
+    timeset = false;
+    if (payload.equals("yes")) timeset = true;
+    send = 0xff;
+  } else if (topic.equals("Spa/filterset/setf1starthour")) {
+    setf1starthour = payload.toInt();
+    send = 0xff;
+  } else if (topic.equals("Spa/filterset/setf1startmin")) {
+    setf1startmin = payload.toInt();
+    send = 0xff;
+  } else if (topic.equals("Spa/filterset/setf1durhour")) {
+    setf1durhour = payload.toInt();
+    send = 0xff;
+  } else if (topic.equals("Spa/filterset/setf1durmin")) {
+    setf1durmin = payload.toInt();
+    send = 0xff;
+  } else if (topic.equals("Spa/filterset/setf2starthour")) {
+    setf2starthour = payload.toInt();
+    send = 0xff;
+  } else if (topic.equals("Spa/filterset/setf2startmin")) {
+    setf2startmin = payload.toInt();
+    send = 0xff;
+  } else if (topic.equals("Spa/filterset/setf2durhour")) {
+    setf2durhour = payload.toInt();
+    send = 0xff;
+  } else if (topic.equals("Spa/filterset/setf2durmin")) {
+    setf2durmin = payload.toInt();
+    send = 0xff;
+  } else if (topic.equals("Spa/filterset/setfilter")) {
+    // Set Filtertime
+    setfilter = false;
+    if (payload.equals("yes")) setfilter = true;
+    send = 0xff;
+
   }
 }
 
@@ -750,9 +818,9 @@ void setup() {
   }
 
   pinMode(RLY1, OUTPUT);
-  digitalWrite(RLY1, HIGH);
+  digitalWrite(RLY1, LOW);
   pinMode(RLY2, OUTPUT);
-  digitalWrite(RLY2, HIGH);
+  digitalWrite(RLY2, LOW);
 
   // Spa communication, 115.200 baud 8N1
   Serial.begin(115200);
@@ -786,7 +854,7 @@ void setup() {
   httpUpdater.setup(&httpServer, "admin", "");
   httpServer.begin();
 
-  mqtt.setServer(BROKER.c_str(), 1883);
+  mqtt.setServer(BROKER.c_str(), 1980);
   mqtt.setCallback(callback);
   mqtt.setKeepAlive(10);
   mqtt.setSocketTimeout(20);
@@ -906,7 +974,7 @@ void loop() {
           Q_out.push(0xBF);
           Q_out.push(0x20);
           Q_out.push(settemp);
-        } else if (send == 0x00) {
+        }else if (send == 0x00) {
           if (have_config == 0) { // Get configuration of the hot tub
             Q_out.push(id);
             Q_out.push(0xBF);
@@ -934,6 +1002,28 @@ void loop() {
             Q_out.push(0x00);
             //mqtt.publish("Spa/debug/have_faultlog", "requesting filter settings, #1");
             have_filtersettings = 1;
+          } else if (timeset) { // set current time
+            Q_out.push(id);
+            Q_out.push(0xBF);
+            Q_out.push(0x21);
+            Q_out.push(sethour);
+            Q_out.push(setmin);
+            timeset = false;
+            mqtt.publish("Spa/time/timeset", "no");
+          } else if (setfilter) { // set filter times
+            Q_out.push(id);
+            Q_out.push(0xBF);
+            Q_out.push(0x23); // Filter cycle
+            Q_out.push(setf1starthour); // start h
+            Q_out.push(setf1startmin); // start m
+            Q_out.push(setf1durhour); // dur h
+            Q_out.push(setf1durmin); // dur m
+            Q_out.push(setf2starthour); //2 start h
+            Q_out.push(setf2startmin); //2 start m
+            Q_out.push(setf2durhour); //2 dur h
+            Q_out.push(setf2durmin); //2 dur m
+            setfilter = false;
+            mqtt.publish("Spa/filterset/setfilter", "no");
           } else {
             // A Nothing to Send message is sent by a client immediately after a Clear to Send message if the client has no messages to send.
             Q_out.push(id);
