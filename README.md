@@ -1,7 +1,9 @@
 Based on the great work over at \
 https://github.com/ccutrer/balboa_worldwide_app/wiki
 https://github.com/ccutrer/balboa_worldwide_app/blob/master/doc/protocol.md
+https://github.com/cribskip/esp8266_spa
 
+Cribskip did all the basics while I only amended according my personal preferences
 
 # esp8266_spa
 Control for a Balboa spa controller using the esp8266 (tested on BP2100 and BP601 series)
@@ -25,6 +27,8 @@ Bonus: you may add several relays or such like I did ;-)
 # Parts
 - Get a esp8266, perferable a Wemos D1 Pro in case you need to attach a seperate antenna
 - RS485 bus transceiver, (for example the "ARCELI TTL To RS485 Adapter 485 Serial Port UART Level Converter Module 3.3V 5V")
+  - ATTENTION! It took me several days and a lot of sweat to find out that it MANDATORY TO USE A TRANSCEIVER WITH A MAX13487 chip! MAX485 will not work!
+  - https://www.amazon.de/dp/B07B667STP worked on my system
 - A DC-DC converter for powering from the Tub (LM2596 for example)
 - breadboard, wire etc...
 
